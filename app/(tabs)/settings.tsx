@@ -3,12 +3,23 @@ import { useAudioPlayer } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  I18nManager,
+  Image,
+  KeyboardAvoidingView, Modal,
+  Platform, ScrollView, StyleSheet, Switch, Text, TextInput,
+  TouchableOpacity, View
+} from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppAlert } from '../../hooks/useAppAlert';
 import { t, useLanguage } from '../../utils/i18n';
 import AppAlert from '../AppAlert';
+
+// FIX RTL: Prevent Android APK from forcing RTL layout
+I18nManager.allowRTL(false);
+I18nManager.forceRTL(false);
 
 type Theme = 'dark' | 'light';
 
@@ -87,14 +98,37 @@ export default function SettingsScreen() {
   const [playingSheikh, setPlayingSheikh] = useState<string | null>(null);
   const [resetConfirmVisible, setResetConfirmVisible] = useState(false);
 
-  // expo-audio player
-  const [currentSource, setCurrentSource] = useState<any>(null);
-  const player = useAudioPlayer(currentSource);
+  // FIX AUDIO: Create player WITHOUT source, use replace() later
+  const player = useAudioPlayer();
+  const currentPlayingRef = useRef<{ sheikh: string | null; prayer: string | null }>({ sheikh: null, prayer: null });
 
   useEffect(() => {
     loadSettings();
     checkDownloadedAdhan();
+    setupNotifications();
   }, []);
+
+  // FIX NOTIFICATIONS: Setup Android channel + request permissions
+  async function setupNotifications() {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('prayer-adhan', {
+        name: 'Prayer Adhan',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#c9a84c',
+      });
+      await Notifications.setNotificationChannelAsync('athkar-reminder', {
+        name: 'Athkar Reminders',
+        importance: Notifications.AndroidImportance.DEFAULT,
+        sound: 'default',
+      });
+    }
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') {
+      console.log('Notification permissions not granted');
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -157,14 +191,17 @@ export default function SettingsScreen() {
     setDownloadingSheikhKey(null);
   }
 
+  // FIX AUDIO: Use replace() instead of re-creating player
   async function handlePlayAdhan(sheikhKey: string | 'default', prayerKey: string) {
     try {
-      // Stop current if playing same
-      if (playingPrayer === prayerKey && playingSheikh === sheikhKey) {
-        player.pause();
+      const currentlyPlaying = currentPlayingRef.current;
+
+      // If same button clicked, pause
+      if (currentlyPlaying.sheikh === sheikhKey && currentlyPlaying.prayer === prayerKey) {
+        await player.pause();
+        currentPlayingRef.current = { sheikh: null, prayer: null };
         setPlayingPrayer(null);
         setPlayingSheikh(null);
-        setCurrentSource(null);
         return;
       }
 
@@ -191,22 +228,27 @@ export default function SettingsScreen() {
         return;
       }
 
-      setCurrentSource(source);
+      // Pause current first
+      await player.pause();
+
+      // Replace source and play
+      await player.replace(source);
+      await player.play();
+
+      currentPlayingRef.current = { sheikh: sheikhKey, prayer: prayerKey };
       setPlayingPrayer(prayerKey);
       setPlayingSheikh(sheikhKey);
-
-      // Small delay to let source update before play
-      setTimeout(() => {
-        player.play();
-      }, 100);
     } catch (e) {
+      console.error('Audio play error:', e);
       showAlert(t('playError'), 'error');
     }
   }
 
   async function closeAdhanModal() {
-    player.pause();
-    setCurrentSource(null);
+    try {
+      await player.pause();
+    } catch (e) {}
+    currentPlayingRef.current = { sheikh: null, prayer: null };
     setPlayingPrayer(null);
     setPlayingSheikh(null);
     setActiveModal(null);
@@ -332,7 +374,7 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal البروفايل - مع KeyboardAvoidingView */}
+      {/* Modal البروفايل */}
       <Modal visible={activeModal === 'profile'} transparent animationType="slide">
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -359,6 +401,7 @@ export default function SettingsScreen() {
               placeholderTextColor={isDarkMode ? '#555' : '#888'}
               textAlign="right"
             />
+            {/* FIX: Equal height buttons */}
             <View style={styles.modalBtns}>
               <TouchableOpacity
                 style={styles.modalSaveBtn}
@@ -366,7 +409,10 @@ export default function SettingsScreen() {
               >
                 <Text style={styles.modalSaveBtnText}>💾 {t('save')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalCancelBtn, { backgroundColor: themeStyles.inputBg, borderColor: themeStyles.border }]} onPress={() => setActiveModal(null)}>
+              <TouchableOpacity 
+                style={[styles.modalCancelBtn, { backgroundColor: themeStyles.inputBg, borderColor: themeStyles.border }]} 
+                onPress={() => setActiveModal(null)}
+              >
                 <Text style={[styles.modalCancelBtnText, { color: themeStyles.subText }]}>{t('cancel')}</Text>
               </TouchableOpacity>
             </View>
@@ -374,7 +420,7 @@ export default function SettingsScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal المظهر - Radio buttons */}
+      {/* Modal المظهر */}
       <Modal visible={activeModal === 'theme'} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: themeStyles.card }]}>
@@ -522,7 +568,7 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* Modal التنبيهات - Fixed toggles */}
+      {/* Modal التنبيهات - FIXED Toggle with native Switch */}
       <Modal visible={activeModal === 'notifications'} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: themeStyles.card }]}>
@@ -532,25 +578,19 @@ export default function SettingsScreen() {
               { key: 'Athkar', label: t('notifyAthkar'), value: notifyAthkar },
               { key: 'Wird', label: t('notifyWird'), value: notifyWird },
             ].map((item) => (
-              <TouchableOpacity
+              <View
                 key={item.key}
                 style={[styles.toggleRow, { backgroundColor: themeStyles.inputBg, borderColor: themeStyles.border }]}
-                onPress={() => handleToggleNotify(item.key as any, item.value)}
-                activeOpacity={0.9}
               >
                 <Text style={[styles.toggleLabel, { color: themeStyles.text }]}>{item.label}</Text>
-                <View style={[styles.toggleTrack, { backgroundColor: item.value ? themeStyles.accent : themeStyles.border }]}>
-                  <View style={[styles.toggleThumb, { 
-                    backgroundColor: '#ffffff', 
-                    transform: [{ translateX: item.value ? 22 : 0 }],
-                    shadowColor: '#000', 
-                    shadowOffset: { width: 0, height: 2 }, 
-                    shadowOpacity: 0.2, 
-                    shadowRadius: 2, 
-                    elevation: 3 
-                  }]} />
-                </View>
-              </TouchableOpacity>
+                <Switch
+                  value={item.value}
+                  onValueChange={() => handleToggleNotify(item.key as any, item.value)}
+                  trackColor={{ false: themeStyles.border, true: themeStyles.accent + '88' }}
+                  thumbColor={item.value ? themeStyles.accent : '#f4f3f4'}
+                  ios_backgroundColor={themeStyles.border}
+                />
+              </View>
             ))}
             <TouchableOpacity 
               style={[styles.modalCloseBtn, { backgroundColor: themeStyles.accent, marginTop: 10 }]} 
@@ -655,23 +695,44 @@ const styles = StyleSheet.create({
   modalTitle: { color: '#c9a84c', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   modalLabel: { fontSize: 13, textAlign: 'right', marginBottom: 8 },
   modalInput: { borderRadius: 10, padding: 12, fontSize: 16, borderWidth: 1, marginBottom: 16 },
-  modalBtns: { flexDirection: 'row', gap: 10 },
-  modalSaveBtn: { flex: 1, backgroundColor: '#c9a84c', borderRadius: 10, padding: 14, alignItems: 'center' },
+  // FIX: Equal height and aligned buttons
+  modalBtns: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  modalSaveBtn: { 
+    flex: 1, 
+    backgroundColor: '#c9a84c', 
+    borderRadius: 10, 
+    paddingVertical: 14, 
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalSaveBtnText: { color: '#0f1923', fontWeight: 'bold', fontSize: 15 },
-  modalCancelBtn: { flex: 1, borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, marginTop: 10 },
-  modalCancelBtnText: { fontSize: 15 },
+  modalCancelBtn: { 
+    flex: 1, 
+    borderRadius: 10, 
+    paddingVertical: 14, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  modalCancelBtnText: { fontSize: 15, fontWeight: 'bold' },
   modalCloseBtn: { borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 5, elevation: 2, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
   modalCloseBtnText: { fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   optionRow: { flexDirection: 'row-reverse', alignItems: 'center', borderRadius: 10, padding: 14, marginBottom: 8, borderWidth: 1 },
   optionLabel: { flex: 1, fontSize: 15, textAlign: 'right' },
-  // Radio button styles
   radioSelected: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioInner: { width: 10, height: 10, borderRadius: 5 },
   radioUnselected: { width: 22, height: 22, borderRadius: 11, borderWidth: 2 },
-  toggleRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, padding: 14, marginBottom: 8, borderWidth: 1 },
-  toggleLabel: { fontSize: 15 },
-  toggleTrack: { width: 50, height: 28, borderRadius: 14, justifyContent: 'center', padding: 2 },
-  toggleThumb: { width: 24, height: 24, borderRadius: 12 },
+  // FIX: Better toggle row layout using native Switch
+  toggleRow: { 
+    flexDirection: 'row-reverse', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    borderRadius: 10, 
+    padding: 14, 
+    marginBottom: 8, 
+    borderWidth: 1,
+  },
+  toggleLabel: { fontSize: 15, fontWeight: '600' },
   avatarPickerBtn: { alignItems: 'center', marginBottom: 16 },
   modalAvatar: { width: 80, height: 80, borderRadius: 40, marginBottom: 8 },
   modalAvatarPlaceholder: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1 },

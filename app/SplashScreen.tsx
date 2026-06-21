@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from './../context/ThemeContext';
 
 interface SplashScreenProps {
@@ -7,43 +7,30 @@ interface SplashScreenProps {
 }
 
 export default function SplashScreen({ onFinish }: SplashScreenProps) {
-  const { themeStyles, isDarkMode } = useTheme();
+  const { themeStyles } = useTheme();
   const [isReady, setIsReady] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const textFadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Entry animation
-    Animated.sequence([
-      Animated.parallel([
-        Animated.timing(scaleAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.back(1.5)),
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-          easing: Easing.out(Easing.cubic),
-        }),
-      ]),
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.cubic),
+      }),
       Animated.timing(textFadeAnim, {
         toValue: 1,
-        duration: 600,
+        duration: 800,
+        delay: 400,
         useNativeDriver: true,
       }),
     ]).start();
 
-    // Wait then exit
-    const timer = setTimeout(() => {
-      setIsReady(true);
-    }, 2500);
-
+    const timer = setTimeout(() => setIsReady(true), 3000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -51,47 +38,37 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
     if (isReady) {
       Animated.timing(fadeAnim, {
         toValue: 0,
-        duration: 600,
+        duration: 700,
         useNativeDriver: true,
         easing: Easing.in(Easing.ease),
-      }).start(() => {
-        onFinish();
-      });
+      }).start(() => onFinish());
     }
-  }, [isReady]);
-
-  const rotate = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
+  }, [isReady, onFinish]);
 
   return (
     <Animated.View style={[styles.container, { backgroundColor: themeStyles.bg, opacity: fadeAnim }]}>
-      <Animated.View style={[styles.logoContainer, { transform: [{ scale: scaleAnim }, { rotate }] }]}>
-        <View style={[styles.logoOuter, { borderColor: themeStyles.accent }]}>
-          <View style={[styles.logoInner, { backgroundColor: themeStyles.accent }]}>
-            <Text style={styles.logoText}>🕌</Text>
-          </View>
-        </View>
+      <Animated.View style={[styles.logoContainer, { transform: [{ scale: scaleAnim }] }]}>
+        <Image 
+          source={require('../../assets/splash-logo.png')} 
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
       </Animated.View>
 
-      <Animated.View style={{ opacity: textFadeAnim, alignItems: 'center' }}>
+      <Animated.View style={{ opacity: textFadeAnim, alignItems: 'center', marginTop: 20 }}>
         <Text style={[styles.appName, { color: themeStyles.accent }]}>صلاتي</Text>
         <Text style={[styles.subtitle, { color: themeStyles.subText }]}>
-          {isDarkMode ? 'رفيقك في الطاعة' : 'رفيقك في الطاعة'}
+          اقر صلاتك تطلب حياتك
         </Text>
       </Animated.View>
 
       <Animated.View style={[styles.loadingContainer, { opacity: textFadeAnim }]}>
         <View style={styles.loadingBar}>
-          <Animated.View 
-            style={[
-              styles.loadingFill, 
-              { backgroundColor: themeStyles.accent }
-            ]} 
-          />
+          <View style={[styles.loadingFill, { backgroundColor: themeStyles.accent }]} />
         </View>
-        <Text style={[styles.loadingText, { color: themeStyles.subText }]}>جاري التحميل...</Text>
+        <Text style={[styles.loadingText, { color: themeStyles.subText }]}>
+          جاري التحميل...
+        </Text>
       </Animated.View>
     </Animated.View>
   );
@@ -103,54 +80,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 999,
+    top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 9999,
   },
   logoContainer: {
-    marginBottom: 24,
-  },
-  logoOuter: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoInner: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoText: {
-    fontSize: 50,
+  logoImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
   },
   appName: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 6,
     letterSpacing: 2,
   },
   subtitle: {
-    fontSize: 14,
-    marginBottom: 40,
+    fontSize: 16,
+    fontWeight: '500',
   },
   loadingContainer: {
-    width: 200,
+    width: 180,
     alignItems: 'center',
+    position: 'absolute',
+    bottom: 80,
   },
   loadingBar: {
     width: '100%',
-    height: 4,
+    height: 3,
     backgroundColor: 'rgba(201, 168, 76, 0.2)',
     borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   loadingFill: {
     width: '60%',
