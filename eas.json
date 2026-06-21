@@ -12,6 +12,9 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EAS_BUILD_NPM_INSTALL_STRATEGY": "npm-install"
       }
     },
     "production": {
