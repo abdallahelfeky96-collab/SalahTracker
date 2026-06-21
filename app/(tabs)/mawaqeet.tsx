@@ -57,6 +57,7 @@ export default function HomeScreen() {
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
         enableVibrate: true,
+        sound: 'fajr.mp3', // صوت افتراضي للقناة
       });
     }
   }
@@ -156,37 +157,44 @@ export default function HomeScreen() {
       for (const prayer of corePrayers) {
         const prayerDate = prayerTimes[prayer.key];
         if (prayerDate && prayerDate > now) {
-          let soundConfig: any = true;
-          let bodyText = `أقم صلاتك تنعم بحياتك، موعد الأذان حسب توقيتك المحلي.`;
 
-          if (sheikhKey === 'default') {
-            const adhanUri = await getAdhanSoundUri(prayer.key, 'default');
-            if (adhanUri) {
-              soundConfig = adhanUri;
-              bodyText = `🎵 أذان الافتراضي - حان وقت صلاة ${prayer.name}`;
-            }
-          } else if (sheikhKey === downloadedSheikh) {
+          let soundName = `${prayer.key}.mp3`; // الصوت الافتراضي من res/raw
+          let bodyText = `أقم صلاتك تنعم بحياتك`;
+
+          if (sheikhKey !== 'default' && sheikhKey === downloadedSheikh) {
+            // لو المستخدم حمّل أذان شيخ معين نستخدمه
             const adhanUri = await getAdhanSoundUri(prayer.key, sheikhKey);
             if (adhanUri) {
-              soundConfig = adhanUri;
+              soundName = adhanUri;
               bodyText = `🎵 أذان ${getSheikhLabel(sheikhKey)} - حان وقت صلاة ${prayer.name}`;
             } else {
-              bodyText = `⚠️ أذان ${getSheikhLabel(sheikhKey)} غير محمل. حمله من الإعدادات.`;
+              bodyText = `⚠️ أذان ${getSheikhLabel(sheikhKey)} غير محمل، حمله من الإعدادات`;
             }
-          } else if (sheikhKey !== 'default') {
-            bodyText = `⚠️ أذان ${getSheikhLabel(sheikhKey)} غير محمل. حمله من الإعدادات.`;
+          } else if (sheikhKey !== 'default' && sheikhKey !== downloadedSheikh) {
+            bodyText = `⚠️ أذان ${getSheikhLabel(sheikhKey)} غير محمل، حمله من الإعدادات`;
+          }
+
+          // إنشاء channel منفصل لكل صلاة بصوتها الخاص
+          if (Platform.OS === 'android') {
+            await Notifications.setNotificationChannelAsync(`prayer-${prayer.key}`, {
+              name: `أذان ${prayer.name}`,
+              importance: Notifications.AndroidImportance.MAX,
+              vibrationPattern: [0, 250, 250, 250],
+              enableVibrate: true,
+              sound: soundName,
+            });
           }
 
           await Notifications.scheduleNotificationAsync({
             content: {
               title: `🕌 حان الآن موعد صلاة ${prayer.name}`,
               body: bodyText,
-              sound: soundConfig,
+              sound: soundName,
             },
             trigger: {
               type: Notifications.SchedulableTriggerInputTypes.DATE,
               date: prayerDate,
-              channelId: 'prayer-alerts',
+              channelId: `prayer-${prayer.key}`,
             } as any,
           });
         }
@@ -195,7 +203,6 @@ export default function HomeScreen() {
       console.error('Error scheduling core prayers: ', e);
     }
   }
-
   function getSheikhLabel(key: string): string {
     const labels: { [key: string]: string } = {
       'default': 'الافتراضي',

@@ -1,11 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy';
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator, Dimensions, FlatList, I18nManager, Image,
-  ScrollView, StyleSheet, Text, TouchableOpacity, View
-} from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, FlatList, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppAlert } from '../../hooks/useAppAlert';
 import AppAlert from '../AppAlert';
@@ -13,9 +10,6 @@ import AppAlert from '../AppAlert';
 const surahsInfo = require('quran-json/dist/chapters/index.json');
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// FIX RTL: Detect if running in RTL mode (Android APK forces RTL for Arabic apps)
-const isRTL = I18nManager.isRTL;
 
 type ReadingMode = 'wird' | 'khatma' | 'free' | null;
 type WirdUnit = 'rub' | 'half' | 'hizb' | 'juz';
@@ -33,17 +27,6 @@ const JUZZES = Array.from({ length: 30 }, (_, i) => ({ number: i + 1, name: `ا�
 const HIZBS = Array.from({ length: 60 }, (_, i) => ({ number: i + 1, name: `الحزب ${i + 1}` }));
 const PAGES_LIST = Array.from({ length: 604 }, (_, i) => i + 1);
 const PAGES = Array.from({ length: 604 }, (_, i) => ({ number: i + 1 }));
-
-// FIX RTL: In RTL APK, FlatList horizontal is mirrored. We reverse data and use inverted=true
-// to get correct visual order [1,2,3...604] from right-to-left (Quran direction)
-const FLATLIST_DATA = isRTL
-  ? Array.from({ length: 604 }, (_, i) => 604 - i)  // [604, 603, ..., 1]
-  : PAGES_LIST;                                     // [1, 2, ..., 604]
-
-// FIX RTL: Convert page number to FlatList index
-const pageToIndex = (page: number) => isRTL ? 604 - page : page - 1;
-// FIX RTL: Convert FlatList index to page number
-const indexToPage = (index: number) => isRTL ? 604 - index : index + 1;
 
 const SURAH_PAGES: { [key: number]: number } = {
   1: 1, 2: 2, 3: 50, 4: 77, 5: 106, 6: 128, 7: 151, 8: 177, 9: 187,
@@ -83,27 +66,6 @@ function getCurrentSurahName(page: number): string {
   return surah ? surah.name : '';
 }
 
-// Memoized page item to prevent re-render of all 604 images
-const PageItem = memo(({ pageNum, isDownloaded, docDir }: any) => {
-  const source = isDownloaded
-    ? { uri: `${docDir}quran_pages/${pageNum}.png` }
-    : {
-        uri: `https://www.searchtruth.com/quran/images/images10/${pageNum}.png`,
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-      };
-
-  return (
-    <View style={{ width: SCREEN_WIDTH, height: '90%' }}>
-      <Image
-        source={source}
-        style={styles.pageImageFull}
-        resizeMode="stretch"
-        fadeDuration={0}
-      />
-    </View>
-  );
-});
-
 export default function QuranScreen() {
   const { themeStyles, isDarkMode } = useTheme();
   const [screen, setScreen] = useState<'setup' | 'index' | 'read'>('setup');
@@ -121,12 +83,6 @@ export default function QuranScreen() {
   const flatListRef = useRef<FlatList>(null);
   const docDir = (FileSystem as any).documentDirectory || '';
 
-  // Refs to prevent scroll/save loop
-  const isUserScrollingRef = useRef(false);
-  const lastSavedPageRef = useRef(1);
-  const pendingSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasScrolledToInitialRef = useRef(false);
-
   useEffect(() => { 
     loadProgress(); 
     checkDownloadStatus();
@@ -139,23 +95,16 @@ export default function QuranScreen() {
     }, [])
   );
 
-  // FIX: Only auto-scroll when ENTERING read screen, not when currentPage changes from scroll
+  // FIX: Scroll to correct page when entering read screen - use natural order (no reverse)
   useEffect(() => {
-    if (screen === 'read' && flatListRef.current && !hasScrolledToInitialRef.current) {
-      hasScrolledToInitialRef.current = true;
-      const index = pageToIndex(currentPage);
+    if (screen === 'read' && flatListRef.current) {
+      const index = currentPage - 1; // Natural order: page 1 = index 0
       const timer = setTimeout(() => {
-        flatListRef.current?.scrollToOffset({
-          offset: index * SCREEN_WIDTH,
-          animated: false,
-        });
-      }, 400);
+        flatListRef.current?.scrollToIndex({ index, animated: false });
+      }, 300);
       return () => clearTimeout(timer);
     }
-    if (screen !== 'read') {
-      hasScrolledToInitialRef.current = false;
-    }
-  }, [screen]);
+  }, [screen, currentPage]);
 
   async function checkDownloadStatus() {
     try {
@@ -209,7 +158,6 @@ export default function QuranScreen() {
         setMode(parsed.mode);
         const savedPage = parsed.currentPage || 1;
         setCurrentPage(savedPage);
-        lastSavedPageRef.current = savedPage;
         setScreen('index');
       }
     } catch (e) {}
@@ -246,37 +194,24 @@ export default function QuranScreen() {
     }));
     setProgress(newProgress);
     setCurrentPage(1);
-    lastSavedPageRef.current = 1;
-    hasScrolledToInitialRef.current = false;
     setScreen('index');
   }
 
-  // Debounced save to prevent AsyncStorage spam and re-render loop
-  const savePosition = useCallback(async (page: number) => {
-    if (!progress || page === lastSavedPageRef.current) return;
-
-    lastSavedPageRef.current = page;
-
-    if (pendingSaveRef.current) {
-      clearTimeout(pendingSaveRef.current);
-    }
-
-    pendingSaveRef.current = setTimeout(async () => {
-      const updated = { ...progress, currentPage: page };
-      await AsyncStorage.setItem('quran_progress', JSON.stringify(updated));
-      await AsyncStorage.setItem('quran_stats', JSON.stringify({
-        mode: updated.mode, wirdLabel: updated.wirdLabel,
-        pagesPerDay: updated.pagesPerDay,
-        completedCycles: updated.completedCycles,
-        currentPage: page, currentSurah: updated.currentSurah,
-        startDate: updated.startDate
-      }));
-      setProgress(updated);
-    }, 500);
-  }, [progress]);
+  async function savePosition(page: number) {
+    if (!progress) return;
+    const updated = { ...progress, currentPage: page };
+    await AsyncStorage.setItem('quran_progress', JSON.stringify(updated));
+    await AsyncStorage.setItem('quran_stats', JSON.stringify({
+      mode: updated.mode, wirdLabel: updated.wirdLabel,
+      pagesPerDay: updated.pagesPerDay,
+      completedCycles: updated.completedCycles,
+      currentPage: page, currentSurah: updated.currentSurah,
+      startDate: updated.startDate
+    }));
+    setProgress(updated);
+  }
 
   async function resetProgress() {
-    if (pendingSaveRef.current) clearTimeout(pendingSaveRef.current);
     await AsyncStorage.removeItem('quran_progress');
     await AsyncStorage.removeItem('quran_stats');
     setProgress(null);
@@ -284,27 +219,29 @@ export default function QuranScreen() {
     setWirdUnit(null);
     setKhatmaCount(null);
     setCurrentPage(1);
-    lastSavedPageRef.current = 1;
-    hasScrolledToInitialRef.current = false;
     setScreen('setup');
   }
 
-  // Use onViewableItemsChanged for accurate page tracking
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems.length > 0 && isUserScrollingRef.current) {
-      const index = viewableItems[0].index;
-      const page = indexToPage(index);
-      if (page >= 1 && page <= 604 && page !== currentPage) {
-        setCurrentPage(page);
-        savePosition(page);
-      }
+  // FIX: Natural page order - no reverse math
+  const onMomentumScrollEnd = (event: any) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offsetX / SCREEN_WIDTH);
+    const page = index + 1; // Natural order: index 0 = page 1
+    if (page >= 1 && page <= 604 && page !== currentPage) {
+      setCurrentPage(page);
+      savePosition(page);
     }
-  }).current;
+  };
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 200,
-  }).current;
+  const getPageSource = (pageNum: number) => {
+    if (isDownloaded) {
+      return { uri: `${docDir}quran_pages/${pageNum}.png` };
+    }
+    return {
+      uri: `https://www.searchtruth.com/quran/images/images10/${pageNum}.png`,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    };
+  };
 
   if (screen === 'setup') {
     return (
@@ -461,8 +398,6 @@ export default function QuranScreen() {
                 onPress={() => {
                   const page = SURAH_PAGES[item.id] || 1;
                   setCurrentPage(page);
-                  lastSavedPageRef.current = page;
-                  hasScrolledToInitialRef.current = false;
                   savePosition(page);
                   setScreen('read');
                 }}
@@ -493,8 +428,6 @@ export default function QuranScreen() {
                 onPress={() => {
                   const page = JUZ_PAGES[item.number] || 1;
                   setCurrentPage(page);
-                  lastSavedPageRef.current = page;
-                  hasScrolledToInitialRef.current = false;
                   savePosition(page);
                   setScreen('read');
                 }}
@@ -522,8 +455,6 @@ export default function QuranScreen() {
                 onPress={() => {
                   const page = Math.round(((item.number - 1) / 60) * 604) + 1;
                   setCurrentPage(page);
-                  lastSavedPageRef.current = page;
-                  hasScrolledToInitialRef.current = false;
                   savePosition(page);
                   setScreen('read');
                 }}
@@ -553,8 +484,6 @@ export default function QuranScreen() {
                 ]}
                 onPress={() => {
                   setCurrentPage(item.number);
-                  lastSavedPageRef.current = item.number;
-                  hasScrolledToInitialRef.current = false;
                   savePosition(item.number);
                   setScreen('read');
                 }}
@@ -590,38 +519,26 @@ export default function QuranScreen() {
       <View style={styles.pageContainerFull}>
         <FlatList
           ref={flatListRef}
-          // FIX RTL: Use inverted data for RTL APK
-          data={FLATLIST_DATA}
+          data={PAGES_LIST}  // FIX: No reverse! Natural order [1, 2, 3, ..., 604]
           keyExtractor={(item) => item.toString()}
           horizontal
           pagingEnabled
-          // FIX RTL: Invert FlatList in RTL to fix scroll direction
-          inverted={isRTL}
           showsHorizontalScrollIndicator={false}
-          // FIX Crash: Remove initialScrollIndex, use scrollToOffset in useEffect instead
+          initialScrollIndex={currentPage - 1}  // FIX: Page 1 = index 0
           getItemLayout={(_, index) => ({
             length: SCREEN_WIDTH,
             offset: SCREEN_WIDTH * index,
             index,
           })}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          onScrollBeginDrag={() => { isUserScrollingRef.current = true; }}
-          onScrollEndDrag={() => { 
-            setTimeout(() => { isUserScrollingRef.current = false; }, 300);
-          }}
-          // Performance optimizations for 604 heavy images
-          windowSize={3}
-          maxToRenderPerBatch={3}
-          initialNumToRender={3}
-          removeClippedSubviews={true}
-          updateCellsBatchingPeriod={100}
+          onMomentumScrollEnd={onMomentumScrollEnd}
           renderItem={({ item: pageNum }) => (
-            <PageItem 
-              pageNum={pageNum} 
-              isDownloaded={isDownloaded} 
-              docDir={docDir}
-            />
+            <View style={{ width: SCREEN_WIDTH, height: '90%' }}>
+              <Image
+                source={getPageSource(pageNum)}
+                style={styles.pageImageFull}
+                resizeMode="stretch" 
+              />
+            </View>
           )}
         />
       </View>

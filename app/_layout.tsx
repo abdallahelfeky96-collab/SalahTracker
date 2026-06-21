@@ -1,25 +1,15 @@
 import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
-import { I18nManager } from 'react-native';
+import { useState } from 'react';
 import { ThemeProvider } from './../context/ThemeContext';
-import CustomSplashScreen from './SplashScreen';
-
-I18nManager.allowRTL(false);
-I18nManager.forceRTL(false);
+import SplashScreen from './SplashScreen';
 
 export default function RootLayout() {
-  const [showCustomSplash, setShowCustomSplash] = useState(true);
-
-  useEffect(() => {
-    // اخفاء الـ Native Splash فوراً
-    SplashScreen.hideAsync();
-  }, []);
+  const [showSplash, setShowSplash] = useState(true);
 
   return (
     <ThemeProvider>
-      {showCustomSplash && (
-        <CustomSplashScreen onFinish={() => setShowCustomSplash(false)} />
+      {showSplash && (
+        <SplashScreen onFinish={() => setShowSplash(false)} />
       )}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
