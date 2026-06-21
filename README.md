@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
@@ -48,3 +49,7 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+=======
+# SalahTracker
+An Islamic app designed to track a Muslim's daily prayers over a 40-day period, in addition to providing features for Qibla direction, Quran recitation, and Athkar.
+>>>>>>> c4fe15b2387f183a44d526a6be421dd6fdde6623
